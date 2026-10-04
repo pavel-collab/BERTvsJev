@@ -12,8 +12,8 @@ import urllib.request
 ROOT = Path(__file__).resolve().parent
 
 JEV_MODEL = 'jev-latest'
-INPUT_FILE = ROOT / 'data/authored-v2/test.jsonl'
-OUTPUT_FILE = ROOT / 'results/jev.jsonl'
+INPUT_FILE = ROOT / 'data/authored-v2-en/test.jsonl'
+OUTPUT_FILE = ROOT / 'results/jev_en.jsonl'
 TIMEOUT_SECONDS = 60.0
 
 
@@ -40,22 +40,26 @@ def load_env():
 QUESTIONS = {
     "topic": {
         "type": "choice",
-        "instructions": "Выбери основную тему обращения. Если тем несколько, выбери тему главной просьбы клиента.",
+        "instructions": "Choose the main topic of the request. If several topics are mentioned, follow the customer's primary request.",
         "criteria": {
-            "billing": "Оплата, возврат денег, списания, счета",
-            "technical": "Ошибка приложения, интеграции или доступ к аккаунту",
-            "sales": "Вопрос о цене, тарифах или покупке",
-            "other": "Все остальные обращения",
+            "billing": "Payments, refunds, charges, invoices and settlement of existing financial obligations",
+            "technical": "Application faults, integrations, account access and product configuration",
+            "sales": "Questions about pricing, plans, licensing or a new purchase",
+            "other": "All other requests",
         },
     },
     "urgent": {
         "type": "noul",
-        "instructions": "Клиент явно просит немедленной помощи или описывает текущую остановку работы либо потерю продаж. Недовольство само по себе не означает срочность.",
+        "instructions": "The customer explicitly requests immediate assistance or describes an ongoing interruption of work or loss of sales. Dissatisfaction alone does not imply urgency.",
     },
     "sentiment": {
         "type": "score",
-        "instructions": "Оцени выраженный в сообщении эмоциональный тон по шкале.",
-        "criteria": ["Негативный: недовольство или раздражение", "Нейтральный: факты или вопрос без выраженной эмоции", "Позитивный: благодарность или удовлетворение"],
+        "instructions": "Assess the emotional tone explicitly expressed in the message using the scale.",
+        "criteria": [
+            "Negative: dissatisfaction or irritation",
+            "Neutral: facts or a question without expressed emotion",
+            "Positive: gratitude or satisfaction",
+        ],
     },
 }
 

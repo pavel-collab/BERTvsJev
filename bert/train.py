@@ -10,19 +10,19 @@ import torch
 from sklearn.metrics import accuracy_score, classification_report
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, set_seed
 
-BERT_MODEL = 'DeepPavlov/rubert-base-cased'
+BERT_MODEL = 'google-bert/bert-base-uncased'
 BERT_REVISION = 'main'
-BERT_OUTPUT_DIR = ROOT / 'bert/weights'
-TRAIN_FILE = ROOT / 'data/authored-v2/train.jsonl'
-VALIDATION_FILE = ROOT / 'data/authored-v2/validation.jsonl'
-TEST_FILE = ROOT / 'data/authored-v2/test.jsonl'
+BERT_OUTPUT_DIR = ROOT / 'bert/weights-en'
+TRAIN_FILE = ROOT / 'data/authored-v2-en/train.jsonl'
+VALIDATION_FILE = ROOT / 'data/authored-v2-en/validation.jsonl'
+TEST_FILE = ROOT / 'data/authored-v2-en/test.jsonl'
 BERT_EPOCHS = 3
 BERT_BATCH_SIZE = 8
 BERT_MAX_LENGTH = 256
 BERT_LEARNING_RATE = 2e-05
 BERT_SEED = 42
 BERT_DEVICE = 'auto'
-BERT_RESULTS_DIR = ROOT / 'results/bert'
+BERT_RESULTS_DIR = ROOT / 'results/bert-en'
 
 LABELS = {"topic": ["billing", "technical", "sales", "other"], "urgent": [0, 1], "sentiment": [0, 1, 2]}
 
@@ -82,6 +82,8 @@ def metrics(truth, predicted, classes):
         "count": len(truth),
         "accuracy": float(accuracy_score(truth, predicted)),
         "macro_f1": report["macro avg"]["f1-score"],
+        "macro_precision": report["macro avg"]["precision"],
+        "macro_recall": report["macro avg"]["recall"],
         "per_class": {
             name: {
                 "precision": report[name]["precision"],

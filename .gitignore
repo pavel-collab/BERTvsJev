@@ -6,3 +6,7 @@ __pycache__/
 results/*.jsonl
 bert/weights/
 results/bert/
+
+bert/weights-en/
+
+results/bert-en/

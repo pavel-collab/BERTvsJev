@@ -1,0 +1,15 @@
+[project]
+name = "jev-bert-benchmark"
+version = "0.1.0"
+description = "Сравнение Jev и fine-tuned BERT на обращениях в поддержку"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "torch>=2.6,<3",
+    "transformers>=4.45,<6",
+    "scikit-learn>=1.5,<2",
+    "matplotlib>=3.9,<4",
+]
+
+[tool.uv]
+package = false

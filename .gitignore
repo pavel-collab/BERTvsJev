@@ -3,7 +3,7 @@ __pycache__
 .venv/
 .env
 __pycache__/
-results/*.jsonl
+results/*
 bert/weights/
 results/bert/
 

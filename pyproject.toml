@@ -9,6 +9,7 @@ dependencies = [
     "transformers>=4.45,<6",
     "scikit-learn>=1.5,<2",
     "matplotlib>=3.9,<4",
+    "typesafe-sdk>=0.7.2,<0.8",
 ]
 
 [tool.uv]

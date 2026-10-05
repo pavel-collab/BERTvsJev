@@ -84,6 +84,13 @@ uv run jev.py run --output results/jev_quickstart.jsonl
 uv run jev_evaluate.py results/jev_quickstart.jsonl
 ```
 
+Обращение к API выполняется через официальный [`typesafe-sdk`](https://docs.typesafe.ai/sdk/python)
+и `AsyncTypeSafeClient`. Один клиент используется на весь запуск и закрывается
+после завершения. Запросы последовательные (`concurrency=1`); автоматические
+повторы отключены. `--timeout` задаёт таймаут HTTP-операций в секундах
+(по умолчанию 60). SDK проверяет типы ответов, а в JSONL сохраняются ответы
+и usage в формате, совместимом с `jev_evaluate.py`.
+
 По умолчанию Jev обрабатывает 48 тестовых обращений: один платный API-запрос
 с тремя вопросами на обращение. Ответы сохраняются в указанном JSONL,
 метрики и матрицы ошибок — в `results/jev-en/`. Оценка сохранённых ответов

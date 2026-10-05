@@ -1,16 +1,18 @@
-"""Минимальный клиент Jev; сторонние зависимости не нужны."""
+"""Обработка обращений через официальный асинхронный SDK TypeSafe."""
 import argparse
+import asyncio
 import hashlib
-import http.client
 import json
 import math
 import os
-import socket
 from pathlib import Path
 import sys
 import time
-import urllib.error
-import urllib.request
+from typesafe_sdk import (
+    AsyncTypeSafeClient, RetryPolicy, TypeSafeError,
+    TypeSafeAPIError, TypeSafeAPIConnectionError,
+    TypeSafeAPITimeoutError, TypeSafeAPIResponseValidationError,
+)
 
 from telemetry import Telemetry
 
@@ -110,44 +112,33 @@ class JevRequestError(RuntimeError):
         self.retry_after = retry_after
 
 
-def call_jev(payload, key, timeout):
-    request = urllib.request.Request(
-        "https://api.typesafe.ai/v1/systemone",
-        data=json.dumps(payload, ensure_ascii=False).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        method="POST",
-    )
+async def call_jev(payload, client):
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as exc:
+        response = await client.system_one(**payload)
+    except TypeSafeAPITimeoutError:
+        raise JevRequestError("Таймаут запроса Jev", "timeout") from None
+    except TypeSafeAPIConnectionError:
+        raise JevRequestError("Сетевая ошибка Jev (DNS, TLS или соединение)", "network") from None
+    except TypeSafeAPIResponseValidationError:
+        raise JevRequestError("Jev вернул неожиданную структуру ответа", "invalid_response") from None
+    except TypeSafeAPIError as exc:
         hints = {400: "Некорректный запрос", 401: "Некорректный API-ключ", 402: "Недостаточно средств",
                  403: "Доступ запрещён", 404: "Endpoint или модель не найдены", 422: "Ошибка схемы запроса",
                  429: "Превышен лимит запросов"}
-        retry_after = exc.headers.get("Retry-After") if exc.headers else None
-        exc.close()
-        hint = hints.get(exc.code, "Ошибка сервиса" if exc.code >= 500 else "Запрос отклонён")
-        raise JevRequestError(f"Jev HTTP {exc.code}: {hint}. Автоматического повтора нет.",
-                              "http", exc.code, retry_after) from None
-    except urllib.error.URLError as exc:
-        kind = "timeout" if isinstance(exc.reason, (TimeoutError, socket.timeout)) else "network"
-        raise JevRequestError("Таймаут запроса Jev" if kind == "timeout" else "Сетевая ошибка Jev (DNS, TLS или соединение)", kind) from None
-    except TimeoutError:
-        raise JevRequestError("Таймаут запроса Jev", "timeout") from None
-    except (http.client.HTTPException, OSError):
-        raise JevRequestError("Соединение Jev оборвано или HTTP-ответ повреждён", "connection") from None
-    except (json.JSONDecodeError, UnicodeError):
-        raise JevRequestError("Jev вернул некорректный JSON", "invalid_json") from None
-    if (not isinstance(result, dict) or not isinstance(result.get("answers"), dict)
-            or not set(payload["questions"]).issubset(result["answers"])
-            or any(not isinstance(result["answers"][name], dict) for name in payload["questions"])
-            or (result.get("usage") is not None and not isinstance(result["usage"], dict))):
+        hint = hints.get(exc.status, "Ошибка сервиса" if exc.status >= 500 else "Запрос отклонён")
+        raise JevRequestError(f"Jev HTTP {exc.status}: {hint}. Автоматического повтора нет.",
+                              "http", exc.status, exc.headers.get("Retry-After")) from None
+    except TypeSafeError:
+        raise JevRequestError("Ошибка конфигурации или запроса SDK TypeSafe", "sdk") from None
+    if any(name not in response.answers or response.answers[name].type != question["type"]
+           for name, question in payload["questions"].items()):
         raise JevRequestError("Jev вернул неожиданную структуру ответа", "invalid_response")
-    return result, time.perf_counter() - started
+    # JSON mode keeps score probability keys as strings for saved-result evaluation.
+    return response.model_dump(mode="json"), time.perf_counter() - started
 
 
-def main():
+async def run():
     load_env()
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -174,49 +165,56 @@ def main():
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    with args.output.open("x") as handle:
-        telemetry = Telemetry("jev", args.input, args.output.parent, {
-            "output": str(args.output), "requested_model": args.model, "timeout_seconds": args.timeout,
-            "batch_size": 1, "concurrency": 1, "expected_examples": len(rows),
-            "latency_definition": "HTTP including network and JSON decoding; no retries or warmup",
-            "pricing": {"currency": "USD", "input_per_million": args.input_usd_per_million,
-                        "output_per_million": args.output_usd_per_million, "source": PRICE_SOURCE,
-                        "verified_date": "2026-10-04", "kind": "estimate_from_usage_not_invoice"}})
-        completed = False
-        try:
-            for row in rows:
-                payload = request_payload(row["text"], args.model)
-                started = time.perf_counter()
-                try:
-                    response, elapsed = call_jev(payload, key, args.timeout)
-                except Exception as exc:
-                    telemetry.record(id=row["id"], phase="measured", status="error",
-                                     latency_seconds=time.perf_counter() - started,
-                                     error_type=type(exc).__name__, error=str(exc), estimated_cost_usd=None,
-                                     error_kind=getattr(exc, "kind", None), http_status=getattr(exc, "http_status", None),
-                                     retry_after=getattr(exc, "retry_after", None))
-                    raise
-                usage, cost = usage_cost(response, args.input_usd_per_million, args.output_usd_per_million)
-                record = {"id": row["id"], "requested_model": args.model, "request_sha256": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest(), "latency_seconds": elapsed, "response": response,
-                          "usage": usage, "estimated_cost_usd": cost}
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                handle.flush()
-                telemetry.record(**record, phase="measured", status="ok", input_characters=len(row["text"]))
-                print(json.dumps(record, ensure_ascii=False, indent=2))
-            completed = True
-        finally:
-            costs = [r.get("estimated_cost_usd") for r in telemetry.records]
-            telemetry.finish(completed, {
-                "estimated_cost_usd_known": sum(c for c in costs if c is not None),
-                "cost_unknown_attempts": sum(c is None for c in costs),
-                "estimated_total_cost_usd": sum(costs) if costs and all(c is not None for c in costs) else None,
-                "usage_known": {name: sum((r.get("usage") or {}).get(name) or 0 for r in telemetry.records)
-                                for name in ("input_tokens", "output_tokens")}})
+    async with AsyncTypeSafeClient(api_key=key, timeout=args.timeout,
+                                  retry=RetryPolicy(max_retries=0),
+                                  base_url="https://api.typesafe.ai") as client:
+        with args.output.open("x") as handle:
+            telemetry = Telemetry("jev", args.input, args.output.parent, {
+                "output": str(args.output), "requested_model": args.model, "timeout_seconds": args.timeout,
+                "batch_size": 1, "concurrency": 1, "expected_examples": len(rows),
+                "latency_definition": "SDK HTTP including network and response validation; reused client; no retries or warmup",
+                "pricing": {"currency": "USD", "input_per_million": args.input_usd_per_million,
+                            "output_per_million": args.output_usd_per_million, "source": PRICE_SOURCE,
+                            "verified_date": "2026-10-04", "kind": "estimate_from_usage_not_invoice"}})
+            completed = False
+            try:
+                for row in rows:
+                    payload = request_payload(row["text"], args.model)
+                    started = time.perf_counter()
+                    try:
+                        response, elapsed = await call_jev(payload, client)
+                    except Exception as exc:
+                        telemetry.record(id=row["id"], phase="measured", status="error",
+                                         latency_seconds=time.perf_counter() - started,
+                                         error_type=type(exc).__name__, error=str(exc), estimated_cost_usd=None,
+                                         error_kind=getattr(exc, "kind", None), http_status=getattr(exc, "http_status", None),
+                                         retry_after=getattr(exc, "retry_after", None))
+                        raise
+                    usage, cost = usage_cost(response, args.input_usd_per_million, args.output_usd_per_million)
+                    record = {"id": row["id"], "requested_model": args.model, "request_sha256": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest(), "latency_seconds": elapsed, "response": response,
+                              "usage": usage, "estimated_cost_usd": cost}
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    handle.flush()
+                    telemetry.record(**record, phase="measured", status="ok", input_characters=len(row["text"]))
+                    print(json.dumps(record, ensure_ascii=False, indent=2))
+                completed = True
+            finally:
+                costs = [r.get("estimated_cost_usd") for r in telemetry.records]
+                telemetry.finish(completed, {
+                    "estimated_cost_usd_known": sum(c for c in costs if c is not None),
+                    "cost_unknown_attempts": sum(c is None for c in costs),
+                    "estimated_total_cost_usd": sum(costs) if costs and all(c is not None for c in costs) else None,
+                    "usage_known": {name: sum((r.get("usage") or {}).get(name) or 0 for r in telemetry.records)
+                                    for name in ("input_tokens", "output_tokens")}})
+
+
+def main():
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, RuntimeError, OSError, urllib.error.URLError) as exc:
+    except (ValueError, RuntimeError, OSError, TypeSafeError) as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         sys.exit(1)

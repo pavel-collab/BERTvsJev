@@ -1,12 +1,17 @@
-# Jev vs BERT
+# Jev, BERT и fastText → GRU → CNN
 
 Репозиторий для сравнения Jev через API в режиме zero-shot и дообученного
-`google-bert/bert-base-uncased` на обращениях в поддержку. Обе модели определяют
+`google-bert/bert-base-uncased` на обращениях в поддержку. Модели определяют
 тему, срочность и тон одного и того же текста. Скрипты позволяют обучить три
 классификатора BERT, оценить качество на общем тесте и измерить задержку,
 пропускную способность и оценочную стоимость API-запросов.
 
 Результаты проведённого эксперимента — в [REPORT.md](REPORT.md).
+
+Классификатор **fastText → GRU → CNN** использует фиксированные предобученные
+векторы `wiki.en.bin` и подсловные представления незнакомых слов.
+Архитектура, команды и результаты — в [gru_cnn/README.md](gru_cnn/README.md).
+Веса: `gru_cnn/weights-fasttext-en/`; результаты: `results/gru-cnn-fasttext-en/`.
 
 ## Датасет
 
@@ -102,3 +107,15 @@ uv run jev_evaluate.py results/jev_quickstart.jsonl
 Телеметрия обоих подходов сохраняется в подкаталогах `telemetry/` внутри
 каталогов результатов. `--batch-size 1` у BERT позволяет сравнивать задержку
 на одно обращение с Jev.
+
+### 5. Оценить fastText → GRU → CNN
+
+После установки `data/embeddings/wiki.en.bin`:
+
+```sh
+.venv/bin/python -m gru_cnn.test test
+```
+
+Для обучения используйте `.venv/bin/python -m gru_cnn.train`; при повторном
+обучении укажите новый `--output`. Инструкции загрузки fastText и настройки —
+в [gru_cnn/README.md](gru_cnn/README.md).
